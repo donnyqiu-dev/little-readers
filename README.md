@@ -38,7 +38,11 @@ Cerita orisinal dengan karakter **Pip** (anjing besar yang ramah), **Nat**, dan 
 Setiap huruf atau buku yang selesai memberi **stiker** untuk album. Tidak ada streak atau skor yang menekan.
 
 ### 👪 Orang tua (dikunci soal hitungan sederhana)
-- **Rekam bunyi huruf.** Suara komputer tidak bisa mengucapkan bunyi huruf tunggal dengan benar (misalnya "t" dibaca "tee"), jadi orang tua merekam **bunyi** tiap huruf sekali. Rekaman disimpan di perangkat. Tanpa rekaman, aplikasi tidak memakai suara komputer untuk bunyi huruf (supaya anak tidak belajar bunyi yang salah); yang diucapkan hanya kata utuh.
+- **Bunyi huruf.** Suara komputer tidak bisa mengucapkan bunyi huruf tunggal dengan benar (misalnya "t" dibaca "tee"), jadi bunyi huruf memakai rekaman manusia:
+  - **Suara bawaan (📦)**: file `sounds/<huruf>.wav` di repo, dipakai semua perangkat. Cara membuatnya: rekam sekali di menu Orang tua, tekan **Ekspor**, lalu upload folder `sounds` ke repo (lihat [sounds/README.md](sounds/README.md)).
+  - **Rekaman sendiri (✅)**: orang tua bisa merekam versi sendiri di perangkatnya, yang dipakai sebagai pengganti suara bawaan.
+  - Setiap rekaman otomatis dipangkas dari jeda hening, disamakan volumenya, dan disimpan sebagai WAV supaya bisa diputar di semua perangkat.
+  - Tanpa rekaman sama sekali, aplikasi tidak memakai suara komputer untuk bunyi huruf (supaya anak tidak belajar bunyi yang salah); yang diucapkan hanya kata utuh.
 - Progres anak, pengaturan (kecepatan suara, baca otomatis, buka semua buku), ganti video per huruf, backup/restore.
 
 ## Gambar ilustrasi

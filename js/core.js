@@ -89,6 +89,95 @@
     }
   };
 
+  /* ---------- Built-in letter sounds (sounds/<letter>.wav in the repo) ---------- */
+  const builtinCache = {};
+  function builtinUrl(l) {
+    if (builtinCache[l] !== undefined) return builtinCache[l];
+    const url = 'sounds/' + l + '.wav';
+    builtinCache[l] = fetch(url, { method: 'HEAD', cache: 'no-cache' })
+      .then(function (r) { return r.ok ? url : null; })
+      .catch(function () { return null; });
+    return builtinCache[l];
+  }
+  /* Own recording on this device wins; otherwise the shared built-in sound. */
+  function letterUrl(l) {
+    return recordings.get('letter-' + l).then(function (own) { return own || builtinUrl(l); });
+  }
+  function letterSource(l) {
+    return recordings.get('letter-' + l).then(function (own) {
+      if (own) return 'own';
+      return builtinUrl(l).then(function (b) { return b ? 'builtin' : null; });
+    });
+  }
+
+  /* ---------- Clean up a recording: mono WAV, silence trimmed, volume normalised ---------- */
+  function toCleanWav(blob) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return Promise.resolve(blob);
+    const ctx = new AC();
+    return blob.arrayBuffer()
+      .then(function (buf) { return new Promise(function (res, rej) { ctx.decodeAudioData(buf, res, rej); }); })
+      .then(function (audio) {
+        const rate = audio.sampleRate;
+        const data = audio.getChannelData(0);
+        let peak = 0;
+        for (let i = 0; i < data.length; i++) peak = Math.max(peak, Math.abs(data[i]));
+        if (peak < 0.01) throw new Error('silent');
+        const th = peak * 0.08;
+        let a = 0, b = data.length - 1;
+        while (a < b && Math.abs(data[a]) < th) a++;
+        while (b > a && Math.abs(data[b]) < th) b--;
+        const pad = Math.floor(rate * 0.06);
+        a = Math.max(0, a - pad); b = Math.min(data.length - 1, b + pad);
+        // resample to 22.05 kHz to keep files small
+        const outRate = 22050, step = rate / outRate;
+        const n = Math.floor((b - a) / step);
+        const pcm = new Int16Array(n);
+        const gain = 0.9 / peak;
+        const fade = Math.floor(outRate * 0.01);
+        for (let i = 0; i < n; i++) {
+          let v = data[a + Math.floor(i * step)] * gain;
+          if (i < fade) v *= i / fade; else if (i > n - fade) v *= (n - i) / fade;
+          pcm[i] = Math.max(-1, Math.min(1, v)) * 32767;
+        }
+        ctx.close && ctx.close();
+        return wavBlob(pcm, outRate);
+      })
+      .catch(function (e) { ctx.close && ctx.close(); if (e && e.message === 'silent') throw e; return blob; });
+  }
+  function wavBlob(pcm, rate) {
+    const buf = new ArrayBuffer(44 + pcm.length * 2);
+    const v = new DataView(buf);
+    function str(o, s) { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); }
+    str(0, 'RIFF'); v.setUint32(4, 36 + pcm.length * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true);
+    v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); str(36, 'data'); v.setUint32(40, pcm.length * 2, true);
+    new Int16Array(buf, 44).set(pcm);
+    return new Blob([buf], { type: 'audio/wav' });
+  }
+
+  /* ---------- Tiny ZIP writer (no compression) for exporting recordings ---------- */
+  const CRC = (function () { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC[(c ^ u8[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+  function zip(files) { // files: [{name, data: Uint8Array}]
+    const parts = [], central = [];
+    let offset = 0;
+    files.forEach(function (f) {
+      const name = new TextEncoder().encode(f.name), crc = crc32(f.data), size = f.data.length;
+      const h = new DataView(new ArrayBuffer(30));
+      h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint32(14, crc, true); h.setUint32(18, size, true); h.setUint32(22, size, true); h.setUint16(26, name.length, true);
+      parts.push(new Uint8Array(h.buffer), name, f.data);
+      const c = new DataView(new ArrayBuffer(46));
+      c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint32(16, crc, true); c.setUint32(20, size, true); c.setUint32(24, size, true); c.setUint16(28, name.length, true); c.setUint32(42, offset, true);
+      central.push(new Uint8Array(c.buffer), name);
+      offset += 30 + name.length + size;
+    });
+    const cdSize = central.reduce(function (s, p) { return s + p.length; }, 0);
+    const e = new DataView(new ArrayBuffer(22));
+    e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, cdSize, true); e.setUint32(16, offset, true);
+    return new Blob(parts.concat(central, [new Uint8Array(e.buffer)]), { type: 'application/zip' });
+  }
+
   /* ---------- Audio ---------- */
   let voices = [];
   function voiceScore(v) {
@@ -165,18 +254,18 @@
   const audio = {
     stop: stop,
     speak: function (text, opts) { stop(); return speak(text, opts); },
-    /* A letter sound: the parent's recording, or (fallback) the key word said slowly. */
+    /* A letter sound: own recording, else the built-in one, else (fallback) the key word said slowly. */
     letter: function (l) {
       stop();
       const my = token;
       const L = LR.LETTERS.find(function (x) { return x.l === l; });
-      return recordings.get('letter-' + l).then(function (url) {
+      return letterUrl(l).then(function (url) {
         if (my !== token) return;
         if (url) return playUrl(url);
         return speak(L ? L.key : l, { rate: 0.7 });
       });
     },
-    hasLetter: function (l) { return recordings.get('letter-' + l).then(function (u) { return !!u; }); },
+    hasLetter: function (l) { return letterUrl(l).then(function (u) { return !!u; }); },
     /* A whole word: human recording if available, else TTS. */
     word: function (w) {
       stop();
@@ -198,7 +287,7 @@
         chain = chain.then(function () {
           if (my !== token) return;
           onLetter && onLetter(i);
-          return recordings.get('letter-' + ch).then(function (url) {
+          return letterUrl(ch).then(function (url) {
             if (my !== token) return;
             // Without a recording stay silent: TTS would say the letter NAME ("ess"), not its sound.
             return url ? playUrl(url) : wait(550);
@@ -293,5 +382,5 @@
   }
 
   window.LR = window.LR || {};
-  Object.assign(LR, { store: store, recordings: recordings, audio: audio, sfx: sfx, esc: esc, $: $, $all: $all, toast: toast, shuffle: shuffle, confetti: confetti, picture: picture, loadPictures: loadPictures, wait: wait });
+  Object.assign(LR, { letterSource: letterSource, toCleanWav: toCleanWav, zip: zip, store: store, recordings: recordings, audio: audio, sfx: sfx, esc: esc, $: $, $all: $all, toast: toast, shuffle: shuffle, confetti: confetti, picture: picture, loadPictures: loadPictures, wait: wait });
 })();

@@ -434,11 +434,18 @@
       '<h2>👪 Orang tua</h2>' +
       (c ? '<div class="card"><h3>📈 Progres ' + esc(c.name) + '</h3>' + progress(c) + '</div>' : '') +
       '<div class="card"><h3>🎙️ Rekam bunyi huruf</h3>' +
-      '<p class="small">Rekam <b>bunyi</b> hurufnya, bukan namanya, dan buat sependek mungkin. Contoh: <b>s</b> = “sss” (bukan “es”), <b>t</b> = “t” pendek (bukan “te” / “tuh”), <b>a</b> = “a” seperti di <i>ant</i>. Tekan 🎙️, ucapkan, tekan ⏹️. Rekaman hanya tersimpan di perangkat ini.</p>' +
+      '<p class="small">Rekam <b>bunyi</b> hurufnya, bukan namanya, dan buat sependek mungkin. Contoh: <b>s</b> = “sss” (bukan “es”), <b>t</b> = “t” pendek (bukan “te” / “tuh”), <b>a</b> = “a” seperti di <i>ant</i>. Tekan 🎙️, ucapkan, tekan ⏹️. Jeda hening dipangkas dan volume disamakan otomatis.</p>' +
+      '<p class="small">📦 = suara <b>bawaan</b> (sama untuk semua perangkat) · ✅ = rekaman sendiri di perangkat ini (dipakai sebagai pengganti bawaan) · ⬜ = belum ada.</p>' +
       '<div class="recs">' + LR.LETTERS.map(function (x) {
-        return '<div class="rec" data-l="' + x.l + '"><b class="rl">' + x.l + '</b><span class="rk">' + x.emoji + ' ' + x.key + '</span>' +
+        return '<div class="rec" data-l="' + x.l + '"><span class="rs">⬜</span><b class="rl">' + x.l + '</b><span class="rk">' + x.emoji + ' ' + x.key + '</span>' +
           '<button class="round sm" data-act="rec">🎙️</button><button class="round sm" data-act="play" disabled>▶️</button><button class="round sm" data-act="del" disabled>🗑️</button></div>';
-      }).join('') + '</div></div>' +
+      }).join('') + '</div>' +
+      '<details class="export"><summary><b>📦 Jadikan suara bawaan untuk semua perangkat</b></summary>' +
+      '<ol class="small"><li>Rekam ke-19 bunyi di atas (✅) di perangkat ini.</li>' +
+      '<li>Tekan <b>Ekspor</b>, lalu file <code>sounds.zip</code> akan terunduh. Ekstrak file itu, dan isinya adalah folder <code>sounds</code> berisi <code>s.wav</code>, <code>a.wav</code>, dst.</li>' +
+      '<li>Di GitHub (branch yang dipakai GitHub Pages): <b>Add file → Upload files</b>, lalu seret folder <code>sounds</code> dan klik <b>Commit changes</b>.</li>' +
+      '<li>Setelah 1–2 menit, semua perangkat otomatis memakai suara itu (📦). Rekaman sendiri di perangkat ini boleh dihapus.</li></ol>' +
+      '<button class="big-btn sm" id="export-sounds">⬇️ Ekspor rekaman (sounds.zip)</button></details></div>' +
       '<div class="card"><h3>⚙️ Pengaturan</h3>' +
       '<label>Kecepatan suara <select id="rate"><option value="0.65">Pelan</option><option value="0.8">Normal</option><option value="0.95">Cepat</option></select></label>' +
       '<label class="chk"><input type="checkbox" id="auto"' + (st.autoRead ? ' checked' : '') + '> Bacakan otomatis setiap halaman buku</label>' +
@@ -502,12 +509,36 @@
   function wireRecorder() {
     let rec = null, chunks = [], stream = null, timer = null;
     function refresh(row) {
-      LR.recordings.get('letter-' + row.dataset.l).then(function (u) {
-        row.querySelector('[data-act="play"]').disabled = !u;
-        row.querySelector('[data-act="del"]').disabled = !u;
-        row.classList.toggle('ok', !!u);
+      LR.letterSource(row.dataset.l).then(function (src) {
+        row.querySelector('[data-act="play"]').disabled = !src;
+        row.querySelector('[data-act="del"]').disabled = src !== 'own'; // built-in sounds live in the repo
+        row.querySelector('.rs').textContent = src === 'own' ? '✅' : src === 'builtin' ? '📦' : '⬜';
+        row.classList.toggle('ok', src === 'own');
+        row.classList.toggle('builtin', src === 'builtin');
       });
     }
+    $('#export-sounds').onclick = function () {
+      const btn = this;
+      btn.disabled = true;
+      Promise.all(LR.LETTERS.map(function (x) {
+        return LR.recordings.get('letter-' + x.l).then(function (url) {
+          if (!url) return null;
+          return fetch(url).then(function (r) { return r.blob(); })
+            .then(function (b) { return b.type === 'audio/wav' ? b : LR.toCleanWav(b); })
+            .then(function (b) { return b.arrayBuffer(); })
+            .then(function (buf) { return { name: 'sounds/' + x.l + '.wav', data: new Uint8Array(buf) }; });
+        });
+      })).then(function (files) {
+        files = files.filter(Boolean);
+        btn.disabled = false;
+        if (!files.length) { LR.toast('Belum ada rekaman di perangkat ini.'); return; }
+        const missing = LR.LETTERS.length - files.length;
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(LR.zip(files));
+        a.download = 'sounds.zip'; a.click();
+        LR.toast('⬇️ sounds.zip: ' + files.length + ' bunyi' + (missing ? ' (' + missing + ' huruf belum direkam)' : ''), 4000);
+      }).catch(function () { btn.disabled = false; LR.toast('⚠️ Ekspor gagal.'); });
+    };
     $all('.rec').forEach(function (row) {
       refresh(row);
       row.addEventListener('click', function (e) {
@@ -527,7 +558,10 @@
               stream.getTracks().forEach(function (t) { t.stop(); });
               b.textContent = '🎙️'; row.classList.remove('recording');
               const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
-              LR.recordings.put('letter-' + l, blob).then(function () { refresh(row); A.letter(l); });
+              LR.toCleanWav(blob)
+                .then(function (clean) { return LR.recordings.put('letter-' + l, clean); })
+                .then(function () { refresh(row); A.letter(l); })
+                .catch(function () { LR.toast('🎙️ Tidak ada suara terekam. Coba lagi lebih dekat ke mikrofon.'); });
             };
             rec.start();
             b.textContent = '⏹️'; row.classList.add('recording');

@@ -175,6 +175,11 @@ button { font: inherit; color: inherit; }
 .recs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
 .rec { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 16px; background: #fffaf3; border: 2px solid var(--line); }
 .rec.ok { border-color: #86efac; background: #f0fdf4; }
+.rec.builtin { border-color: #93c5fd; background: #eff6ff; }
+.rs { width: 22px; text-align: center; }
+.export { margin-top: 12px; }
+.export summary { cursor: pointer; }
+.export code { background: #f5ecdf; padding: 0 4px; border-radius: 4px; }
 .rec.recording { border-color: var(--red); background: #fef2f2; }
 .rl { font-size: 2rem; width: 40px; text-align: center; }
 .rk { flex: 1; font-size: .9rem; color: var(--muted); }
