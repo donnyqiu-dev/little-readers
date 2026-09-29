@@ -1,0 +1,9 @@
+{
+  "name": "Little Readers",
+  "short_name": "Little Readers",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#fff8ee",
+  "theme_color": "#f97316",
+  "icons": [{ "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
